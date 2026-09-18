@@ -87,6 +87,39 @@ private:
 hash_t hash(std::string toHash);
 value_t cut(value_t r, value_t max);
 
+class Transcript {
+public:
+    Transcript(const std::string &init);
+
+    void appendHash(const std::string &label, const hash_t &hashData);
+
+    void appendPoint(const std::string &label, const G1 &point);
+
+    void appendScalar(const std::string &label, const value_t &scalar);
+
+    value_t operator()(const std::string &label);
+
+    value_t getScaled(const std::string &label);
+
+    template<std::size_t N>
+    std::array<value_t, N> getPowerArray(const std::string &label)
+    {
+        auto value = this->operator()(label);
+
+        std::array<value_t, N> pow = {1};
+        for(int i = 1; i < N; i++) {
+            pow[i] = pow[i - 1] * value;
+        }
+
+        return pow;
+    }
+
+private:
+   void updateState(const std::string &data);
+
+   hash_t m_state{""};
+};
+
 }
 
 namespace snrk {
@@ -105,37 +138,23 @@ namespace snrk {
             virtual snrk::json_t toJson() const override;
             virtual bool fromJson(const snrk::json_t &json) override;
 
-            in::hashes_t path;
+            in::commits_t path;
             std::size_t index;
         } ;
 
-        class MultiProof_t : public Jsonable
-        {
-        public:
-            virtual snrk::json_t toJson() const override;
-            virtual bool fromJson(const snrk::json_t &json) override;
-
-            //todo: оптимизация
-            std::vector<Proof_t> proofs;
-            std::vector<std::size_t> indicies;
-        };
-
-
     public:
-        MerkleTree(const std::vector<std::string> &data);
+        MerkleTree(const in::commits_t &data, in::Transcript tr);
 
-        in::hash_t root() const;
+        in::G1 root() const;
 
         std::optional<Proof_t> proof(std::size_t index) const;
 
-        static bool verify(const Proof_t &proof, in::hash_t leaf, in::hash_t root);
-
-        std::optional<MultiProof_t> multiProof(const std::vector<std::size_t> &indices) const;
-
-        static bool multiVerify(const MultiProof_t &proof, in::hashes_t leafs, in::hash_t root);
+        static bool verify(const Proof_t &proof, in::commit_t leaf, in::commit_t root, in::Transcript tr);
 
     private:
-        std::vector<in::hashes_t> m_tree;
+        static in::commit_t sum(const in::commit_t &a, const in::commit_t &b, in::value_t &v);
+
+        std::vector<in::commits_t> m_tree;
     };
 
     struct ProverParams {in::keys_t keys;};

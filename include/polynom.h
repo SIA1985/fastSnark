@@ -2,7 +2,6 @@
 #define POLYNOM_H
 
 #include "types.h"
-
 #include "params.h"
 #include "threader.h"
 
@@ -35,6 +34,8 @@ public:
     CanonicPolynom(std::size_t n);
 
     static CanonicPolynom Zero();
+
+    static CanonicPolynom ZeroPolynom();
 
     static coefs_t coefsFromRoots(roots_t roots);
 
@@ -105,14 +106,6 @@ public:
 
     Range(X_t left, X_t right);
 
-    bool inRangeStrict(X_t x) const;
-
-    bool inRange(X_t x) const;
-
-    pos_t isCrossStrict(const Range &other) const;
-
-    Range crossByStrict(const Range &other) const;
-
     X_t leftBound() const;
     X_t rightBound() const;
 
@@ -141,8 +134,6 @@ public:
 
     RangeMap() = default;
 
-//    RangeMap(std::size_t)
-
     RangeMap(const_iterator begin, const_iterator end)
     {
         m_data.resize(std::distance(begin, end));
@@ -164,7 +155,7 @@ public:
            return last;
         }
 
-        std::size_t segmentIndex = getUL(x - first->first.leftBound()) / (snrk::SplinePartition - 1);
+        std::size_t segmentIndex = getUL(x - first->first.leftBound()) / snrk::SplinePartition;
 
         if (segmentIndex >= m_data.size()) {
            segmentIndex = m_data.size() - 1;
@@ -178,21 +169,21 @@ public:
         return find(x)->second;
     }
 
-    /*Непрерывное заполнение*/
+    /*todo: Непрерывное заполнение*/
     void insert(const Range &range, const T &polynom)
     {
-         if (m_data.size() == 0 ||
-             range.leftBound() == std::prev(cend())->first.rightBound()) {
-             m_data.push_back(pair_t(range, polynom));
-             return;
-         }
+        if (m_data.size() == 0 ||
+            std::prev(cend())->first < range) {
+            m_data.push_back(pair_t(range, polynom));
+            return;
+        }
 
-         if (range.rightBound() == cbegin()->first.leftBound()) {
-             m_data.insert(m_data.begin(), pair_t(range, polynom));
-             return;
-         }
+        if (range < cbegin()->first) {
+            m_data.insert(m_data.begin(), pair_t(range, polynom));
+            return;
+        }
 
-         assert(false);
+        assert(false);
     }
 
     void insert(const pair_t &pair)
@@ -210,7 +201,7 @@ public:
         if (other.size() == 0) {
             return;
         } else
-        if (other.begin()->first.leftBound() == std::prev(end())->first.rightBound()) {
+        if (std::prev(end())->first < other.begin()->first) {
             it = m_data.end();
             if (std::size_t expextedSize = other.size() + size(); m_data.capacity() >= expextedSize) {
                 m_data.resize(expextedSize);
@@ -218,7 +209,7 @@ public:
                 return;
             }
         } else
-        if (std::prev(other.end())->first.rightBound() == begin()->first.leftBound()) {
+        if (std::prev(other.end())->first < begin()->first) {
             it = m_data.begin();
         } else {
             assert(false);
@@ -288,7 +279,7 @@ public:
     SplinePolynom(const RangeMap<CanonicPolynom> &map);
 
     /*O(n)*/
-    SplinePolynom(dots_t dots, bool fromInterpolation = true);
+    SplinePolynom(dots_t dots);
 
     /*O(1)*/
     virtual Y_t operator()(X_t x) const override;
@@ -322,6 +313,8 @@ public:
     // O(n)
     commit_t commit(snrk::ProverParams &pp, segment_t segmentIndex) const;
 
+    CanonicPolynom toCanonicPolynom() const;
+
 protected:
     using operatorPred_t = std::function<CanonicPolynom(RangeMap<CanonicPolynom>::const_iterator it,
                                               RangeMap<CanonicPolynom>::const_iterator itOther)>;
@@ -330,6 +323,7 @@ protected:
     map_t m_map;
 };
 
+#define OPERATORHEADER (const Y_t &a, const Y_t &b) -> Y_t
 class InterpolationPolynom : public Polynom
 {
 public:
@@ -345,6 +339,10 @@ public:
 
     /*O(1)*/
     Y_t operator()(witness_t w) const;
+
+    InterpolationPolynom operator+(const InterpolationPolynom &other) const;
+
+    InterpolationPolynom operator*(const InterpolationPolynom &other) const;
 
     void operator+=(value_t v);
 
@@ -363,20 +361,9 @@ public:
     SplinePolynom toSplinePolynom() const;
 
 protected:
+    InterpolationPolynom operatorPrivate(const InterpolationPolynom &other, std::function<Y_t(const Y_t &, const Y_t &)> pred) const;
+
     dots_t m_dots;
-};
-
-class ZeroWitnessPolynom : public CanonicPolynom
-{
-public:
-    ZeroWitnessPolynom(const witnesses_t &xs);
-
-    SplinePolynom toSplinePolynom() const;
-
-    static SplinePolynom makePartitionZeroPolynom(const in::SplinePolynom &WitnessZ);
-
-private:
-    witnesses_t m_roots;
 };
 
 }

@@ -1,11 +1,11 @@
-# snrk
+# fastSnark
 
 Cryptographic library for creating non-interactive proofs of computations in C++.
 
 ## Features
 
 * **Fast:** Creating of proof has **O(n)** time complexity.
-* **Light:** Size of proof has **O(logn)** memory complexity.
+* **Light:** Size of proof has **O(1)** memory complexity.
 * **Custom:** Make custom operations to proof using basis R1CS.
 
 ## Dependecies
@@ -37,9 +37,8 @@ sudo cmake --install build
 
 After installation you can use library by including only one header: snrk/snrk.h.
 In function snrk::init() the following parameters are set, each of them can be personally set after call of snrk::init():
-* **MultiThreading** = true/false - turns on/off multicore processing
+* **MultiThreading** = true/false - turns on/off multicore processing 
 * **SplinePartition** = 2.. - number of dots in spline segment (6 is optimal)
-* **DotsForProof** = 1.. - number of points to prove (the more, the more reliable)
 
 ### Code example (`main.cpp`):
 
@@ -124,6 +123,10 @@ Compiling via bash:
 ```bash
 g++ main.cpp -o app -lsnrk -lcrypto -lmcl
 ```
+
+## Versions
+0.1 Unsoundness.
+0.2 Soundness. Memory complexity improved from **O(logN)** to **O(1)**.
 
 ## 📄 License
 

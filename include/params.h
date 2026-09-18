@@ -18,8 +18,5 @@ using GateFunc = std::function<std::vector<BaseGate>GateFuncHeader>;
 
 inline std::unordered_map<snrk::GateType, GateFunc> Gates;
 
-inline unsigned int DotsForProof = 40;
-#define FORDOTS for(int i = 0; i < DotsForProof; i++)
-
 }
 #endif // PARAMS_H

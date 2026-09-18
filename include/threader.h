@@ -65,11 +65,6 @@ public:
 
     using fillFunc_t = std::function<void(iterator_t, iterator_t)>;
 
-    enum Bound : char {
-        NoBound,     /*Без захвата границ чанков*/
-        WithBound,   /*С захватом границ чанков (для полиномов)*/
-    };
-
     enum Type : char {
         Range,
         TwoIterators,
@@ -100,7 +95,7 @@ public:
     {
     }
 
-    std::optional<containers_t> operator()(Bound bound = NoBound, std::size_t batchMultiplicity = 1)
+    std::optional<containers_t> operator()(std::size_t batchMultiplicity = 1)
     {
         using split_t = std::function<std::pair<std::vector<pair_t>, int>(iterator_t, iterator_t)>;
 
@@ -111,41 +106,6 @@ public:
         {
             std::vector<pair_t> splittedPayload;
 
-            std::size_t size = std::distance(begin, end);
-            int threadCount = std::thread::hardware_concurrency();
-
-            if (size < static_cast<std::size_t>(threadCount)) {
-                threadCount = size > 0 ? static_cast<int>(size) : 1;
-            }
-
-            splittedPayload.reserve(threadCount);
-            iterator_t it = begin;
-
-            std::size_t baseChunkSize = size / threadCount;
-            std::size_t remainder = size % threadCount;
-
-            for (int i = 0; i < threadCount; ++i) {
-                auto localBegin = it;
-
-                if (localBegin == end) {
-                    splittedPayload.push_back({end, end});
-                    continue;
-                }
-
-                std::size_t currentChunkSize = baseChunkSize + (i < remainder ? 1 : 0);
-
-                std::advance(it, currentChunkSize);
-
-                splittedPayload.push_back({localBegin, it});
-            }
-
-            return {splittedPayload, threadCount};
-        };
-
-        split_t splitPayloadWithBound = [batchMultiplicity] (iterator_t begin, iterator_t end) -> std::pair<std::vector<pair_t>, int>
-        {
-            std::vector<pair_t> splittedPayload;
-
             auto size = std::distance(begin, end);
             int threadCount = std::thread::hardware_concurrency();
 
@@ -153,7 +113,8 @@ public:
             if (batchMultiplicity <= 1) {
                 totalSegments = size;
             } else {
-                totalSegments = (size - 1) / (batchMultiplicity - 1);
+                //todo: ?
+                totalSegments = size / batchMultiplicity;
             }
 
             if (totalSegments < static_cast<std::size_t>(threadCount)) {
@@ -185,7 +146,7 @@ public:
                 if (batchMultiplicity <= 1) {
                     pointsToRead = segmentsForThisThread;
                 } else {
-                    pointsToRead = (segmentsForThisThread * (batchMultiplicity - 1)) + 1;
+                    pointsToRead = (segmentsForThisThread * batchMultiplicity);
                 }
 
                 std::size_t remainingPoints = std::distance(it, end);
@@ -199,8 +160,6 @@ public:
                 std::advance(it, pointsToRead);
 
                 splittedPayload.push_back({localBegin, it});
-
-                std::advance(it, -1);
             }
 
             return {splittedPayload, threadCount};
@@ -217,7 +176,7 @@ public:
                 return {containers_t{result}};
             }
 
-            const auto &[splittedPayload, threadCount] =  (bound == NoBound) ? splitPayload(m_begin, m_end) : splitPayloadWithBound(m_begin, m_end);
+            const auto &[splittedPayload, threadCount] = splitPayload(m_begin, m_end);
             containers.resize(threadCount);
 
             for(int i = 0; i < threadCount; i++) {
@@ -235,12 +194,10 @@ public:
                 return {containers_t{result}};
             }
 
-            split_t &split = (bound == NoBound) ? splitPayload : splitPayloadWithBound;
-
-            const auto &[aSplittedPayload, threadCount] = split(m_a.begin, m_a.end);
+            const auto &[aSplittedPayload, threadCount] = splitPayload(m_a.begin, m_a.end);
             containers.resize(threadCount);
 
-            auto bSplittedPayload = split(m_b.begin, m_b.end).first;
+            auto bSplittedPayload = splitPayload(m_b.begin, m_b.end).first;
 
             for(int i = 0; i < threadCount; i++) {
                 futures.push_back(std::async(m_pairFunc, aSplittedPayload[i], bSplittedPayload[i], std::ref(containers[i])));
@@ -258,7 +215,7 @@ public:
                 return std::nullopt;
             }
 
-            const auto &[splittedPayload, threadCount] =  (bound == NoBound) ? splitPayload(m_begin, m_end) : splitPayloadWithBound(m_begin, m_end);
+            const auto &[splittedPayload, threadCount] = splitPayload(m_begin, m_end);
 
             for(int i = 0; i < threadCount; i++) {
                 futures.push_back(std::async(m_fillFunc, splittedPayload[i].begin, splittedPayload[i].end));

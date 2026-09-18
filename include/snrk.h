@@ -13,8 +13,6 @@ inline void init()
     MultiThreading = true;
 
     SplinePartition = 6;
-
-    DotsForProof = 40;
 }
 
 }

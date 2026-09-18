@@ -1,5 +1,5 @@
-#ifndef CIRCUIT_H
-#define CIRCUIT_H
+#ifndef CIRCUT_H
+#define CIRCUT_H
 
 #include <mutex>
 
@@ -96,4 +96,4 @@ private:
 
 }
 
-#endif // CIRCUIT_H
+#endif // CIRCUT_H

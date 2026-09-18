@@ -41,14 +41,14 @@ public:
     using opsFromS_t = std::unordered_map<BaseGateType, in::dots_t>;
     using TParams_t = struct{in::T_t t; in::SplittedT_t splittedT;};
     using SParams_t = struct{opsFromS_t opsFromS;};
-    using WParams_t = struct{in::W_t wt; in::W_t wi;};
+    using WParams_t = struct{in::W_t wt; in::W_t wi; std::unordered_map<in::witness_t, in::witness_t> map;};
 
     using cond_t = std::unordered_set<in::witness_t>;
 
     using params_t = struct{TParams_t TParams; SParams_t SParams; WParams_t WParams;};
 
 
-    CircutParams(Circuit &circuit, ProverParams &pp);
+    CircutParams(Circuit &circut, ProverParams &pp);
 
     in::witnesses_t witnesses() const;
 
@@ -56,14 +56,14 @@ public:
 
     params_t params() const;
 
-    std::size_t circuitSize() const;
+    std::size_t circutSize() const;
 
 private:
-    void generateT(Circuit &circuit);
+    void generateT(Circuit &circut);
 
-    void generateS(Circuit &circuit);
+    void generateS(Circuit &circut);
 
-    void generateW(Circuit &circuit);
+    void generateW(Circuit &circut);
 
     in::witnesses_t m_witnesses;
 
@@ -75,8 +75,9 @@ private:
     opsFromS_t m_opsFromS;
 
     in::W_t m_WT, m_WI;
+    std::unordered_map<in::witness_t, in::witness_t> map;
 
-    std::size_t m_circuitSize;
+    std::size_t m_circutSize;
 };
 
 }

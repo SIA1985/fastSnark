@@ -14,6 +14,50 @@ witnesses_t genWitnesses(witness_t start, std::size_t count, in::witness_t wStep
     return witnesses;
 }
 
+Transcript::Transcript(const std::string &init)
+{
+    updateState(init);
+}
+
+void Transcript::appendHash(const std::string &label, const hash_t &hashData)
+{
+    updateState(label + hashData);
+}
+
+void Transcript::appendPoint(const std::string &label, const G1 &point)
+{
+    char buf[1024];
+    size_t n = point.serialize(buf, sizeof(buf));
+    updateState(label + std::string{buf, n});
+}
+
+void Transcript::appendScalar(const std::string &label, const value_t &scalar)
+{
+    char buf[1024];
+    size_t n = scalar.serialize(buf, sizeof(buf));
+    updateState(label + std::string{buf, n});
+}
+
+value_t Transcript::operator()(const std::string &label)
+{
+    updateState(label);
+
+    value_t challenge;
+    challenge.setHashOf({m_state.begin(), m_state.end()});
+
+    return challenge;
+}
+
+value_t Transcript::getScaled(const std::string &label)
+{
+    return snrk::CircuitValue::scale(this->operator()(label));
+}
+
+void Transcript::updateState(const std::string &data)
+{
+    m_state = hash(m_state + data);
+}
+
 }
 
 namespace snrk {
@@ -22,11 +66,11 @@ GlobalParams::GlobalParams(in::value_t t)
 {
     mcl::mapToG1(m_vp.g1, 1);
 
-    /*Максимальная степень сплайна согласно 1му умножению*/
     in::G1 current_power = m_vp.g1;
     m_pp.keys.push_back(current_power);
 
-    for (int i = 1; i < 3 * snrk::SplinePartition - 1; i++) {
+    //todo: чтение глобальных параметров
+    for (int i = 1; i < 1'000'000; i++) {
         in::G1::mul(current_power, current_power, t);
         m_pp.keys.push_back(current_power);
     }
@@ -60,24 +104,24 @@ void from_json(const snrk::json_t& j, GlobalParams& gp)
 //    tG.G = j.at("G");
 }
 
-CircutParams::CircutParams(Circuit &circuit, ProverParams &pp)
+CircutParams::CircutParams(Circuit &circut, ProverParams &pp)
     : m_pp{pp}
-    , m_circuitSize{circuit.size()}
+    , m_circutSize{circut.size()}
 {
-    m_witnesses = in::genWitnesses(wStart, circuit.degree(), wStep);
+    m_witnesses = in::genWitnesses(wStart, circut.degree(), wStep);
 
     if (MultiThreading) {
-        std::thread tT(&CircutParams::generateT, this, std::ref(circuit));
-        std::thread tS(&CircutParams::generateS, this, std::ref(circuit));
-        std::thread tW(&CircutParams::generateW, this, std::ref(circuit));
+        std::thread tT(&CircutParams::generateT, this, std::ref(circut));
+        std::thread tS(&CircutParams::generateS, this, std::ref(circut));
+        std::thread tW(&CircutParams::generateW, this, std::ref(circut));
 
         tT.join();
         tS.join();
         tW.join();
     } else {
-        generateT(circuit);
-        generateS(circuit);
-        generateW(circuit);
+        generateT(circut);
+        generateS(circut);
+        generateW(circut);
     }
 }
 
@@ -93,21 +137,21 @@ std::size_t CircutParams::witnessesCount() const
 
 CircutParams::params_t CircutParams::params() const
 {
-    return {.TParams = {m_T, m_splittedT}, .SParams = {m_opsFromS}, .WParams = {m_WT, m_WI}};
+    return {.TParams = {m_T, m_splittedT}, .SParams = {m_opsFromS}, .WParams = {m_WT, m_WI, map}};
 }
 
-std::size_t CircutParams::circuitSize() const
+std::size_t CircutParams::circutSize() const
 {
-    return m_circuitSize;
+    return m_circutSize;
 }
 
-void CircutParams::generateT(Circuit &circuit)
+void CircutParams::generateT(Circuit &circut)
 {
     in::dots_t dots, leftDots, rightDots, resultDots;
 
     auto cw = m_witnesses.cbegin();
 
-    for(const auto& gate : circuit.m_gates) {
+    for(const auto& gate : circut.m_gates) {
         auto left = gate.m_input.a.value();
         auto right = gate.m_input.b.value();
         auto result = IS_SCALED(gate.m_type) ? CircuitValue::scale(gate.m_output.value()) : gate.m_output.value();
@@ -139,11 +183,11 @@ void CircutParams::generateT(Circuit &circuit)
                   };
 }
 
-void CircutParams::generateS(Circuit &circuit)
+void CircutParams::generateS(Circuit &circut)
 {
     auto cw = m_witnesses.cbegin();
-    for(std::size_t i = 0; i < circuit.size(); i++) {
-        auto currentOperation = circuit.m_gates[i].m_type;
+    for(std::size_t i = 0; i < circut.size(); i++) {
+        auto currentOperation = circut.m_gates[i].m_type;
 
         for(int i = 0; i < BaseGate::size; i++) {
             FOROPS {
@@ -157,7 +201,7 @@ void CircutParams::generateS(Circuit &circuit)
     }
 }
 
-void CircutParams::generateW(Circuit &circuit)
+void CircutParams::generateW(Circuit &circut)
 {
     /*addr -> свидетели*/
     std::unordered_map<std::size_t, std::shared_ptr<cond_t>> duplicates;
@@ -173,7 +217,7 @@ void CircutParams::generateW(Circuit &circuit)
 
     auto cw = m_witnesses.cbegin();
 
-    for(const auto &gate : circuit.m_gates) {
+    for(const auto &gate : circut.m_gates) {
         insert(gate.m_input.a, *cw++);
         insert(gate.m_input.b, *cw++);
         insert(gate.m_output, *cw++);
@@ -194,13 +238,18 @@ void CircutParams::generateW(Circuit &circuit)
     dotsWI.reserve(duplicates.size());
     dotsWT.reserve(duplicates.size());
 
-    for(const auto &[_k, condition] : duplicates) {
+    for(const auto &[_, condition] : duplicates) {
         auto begin = condition->begin();
         auto end = condition->end();
 
         for(auto it = begin; it != end;) {
-            dotsWI.push_back({*it, *it});
-            dotsWT.push_back({*it, *circleIterator(begin, ++it, end)});
+            auto current_node = *it;
+            auto next_node = *circleIterator(begin, ++it, end);
+
+            dotsWI.push_back({current_node, current_node});
+            dotsWT.push_back({current_node, next_node});
+
+            map[current_node] = next_node;
         }
     }
 

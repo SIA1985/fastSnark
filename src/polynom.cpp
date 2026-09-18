@@ -1,8 +1,7 @@
 #include "polynom.h"
+#include "threader.h"
 
 #include <csignal>
-
-#include "threader.h"
 
 namespace in {
 
@@ -26,6 +25,18 @@ CanonicPolynom::CanonicPolynom(std::size_t n)
 CanonicPolynom CanonicPolynom::Zero()
 {
     return CanonicPolynom(std::size_t{1});
+}
+
+CanonicPolynom CanonicPolynom::ZeroPolynom()
+{
+    roots_t roots;
+    roots.reserve(snrk::SplinePartition);
+
+    for(std::size_t r = snrk::wStart; r <= snrk::SplinePartition; r += snrk::wStep) {
+        roots.push_back(r);
+    }
+
+    return CanonicPolynom(CanonicPolynom::coefsFromRoots(roots));
 }
 
 CanonicPolynom CanonicPolynom::buildPolynomialRecursive(const roots_t& roots, roots_t::const_iterator start, roots_t::const_iterator end)
@@ -327,6 +338,22 @@ Y_t InterpolationPolynom::operator()(X_t x) const
     return 0;
 }
 
+InterpolationPolynom InterpolationPolynom::operator+(const InterpolationPolynom &other) const
+{
+    return operatorPrivate(other, []OPERATORHEADER
+    {
+        return a + b;
+    });
+}
+
+InterpolationPolynom InterpolationPolynom::operator*(const InterpolationPolynom &other) const
+{
+    return operatorPrivate(other, []OPERATORHEADER
+    {
+        return a * b;
+    });
+}
+
 Y_t InterpolationPolynom::operator()(witness_t w) const
 {
     std::size_t index = (w - snrk::wStart) / snrk::wStep;
@@ -390,15 +417,21 @@ CanonicPolynom InterpolationPolynom::toCanonicPolynom() const
 
     int n = m_dots.size();
 
+    //Перевод в локальные координаты
+    dots_t dots(m_dots.size());
+    for(std::size_t i = 0, x = snrk::wStart; i < m_dots.size(); i++, x += snrk::wStep) {
+        dots[i] = {x, m_dots[i].y};
+    }
+
     // Шаг 1: Вычисление разделённых разностей
-    std::vector<std::vector<value_t>> divDiff(n, std::vector<value_t>(n));
+    std::vector<values_t> divDiff(n, values_t(n));
     for (int i = 0; i < n; ++i) {
-        divDiff[i][0] = m_dots[i].y;
+        divDiff[i][0] = dots[i].y;
     }
 
     for (int j = 1; j < n; ++j) {
         for (int i = j; i < n; ++i) {
-            divDiff[i][j] = (divDiff[i][j-1] - divDiff[i-1][j-1]) / (m_dots[i].x - m_dots[i-j].x);
+            divDiff[i][j] = (divDiff[i][j-1] - divDiff[i-1][j-1]) / (dots[i].x - dots[i-j].x);
         }
     }
 
@@ -424,7 +457,7 @@ CanonicPolynom InterpolationPolynom::toCanonicPolynom() const
         }
 
         for (int k = 0; k < i; ++k) {
-            nextBasisPoly[k] -= newtonBasisPoly[k] * m_dots[i-1].x;
+            nextBasisPoly[k] -= newtonBasisPoly[k] * dots[i-1].x;
         }
         newtonBasisPoly = nextBasisPoly;
 
@@ -441,41 +474,26 @@ SplinePolynom InterpolationPolynom::toSplinePolynom() const
     return SplinePolynom(m_dots);
 }
 
-ZeroWitnessPolynom::ZeroWitnessPolynom(const witnesses_t &xs)
-    : m_roots{xs}
+InterpolationPolynom InterpolationPolynom::operatorPrivate(const InterpolationPolynom &other, std::function<Y_t(const Y_t &, const Y_t &)> pred) const
 {
-}
+    assert(m_dots.front().x == other.m_dots.front().x);
 
-SplinePolynom ZeroWitnessPolynom::toSplinePolynom() const
-{
-    dots_t dots;
-    dots.reserve(m_roots.size());
+    std::size_t min = std::min(m_dots.size(), other.m_dots.size()),
+                max = std::max(m_dots.size(), other.m_dots.size());
 
-    for(const auto &root : m_roots) {
-        dots.push_back({root, 0});
+    const dots_t &longest = (m_dots.size() > other.m_dots.size()) ? m_dots : other.m_dots;
+
+    dots_t dots(max);
+
+    for(std::size_t i = 0; i < min; i++) {
+        dots[i] = {m_dots[i].x, pred(m_dots[i].y, other.m_dots[i].y)};
     }
 
-    return SplinePolynom(dots, false);
-}
-
-SplinePolynom ZeroWitnessPolynom::makePartitionZeroPolynom(const SplinePolynom &WitnessZ)
-{
-    std::size_t size = WitnessZ.segmentsCount();
-    assert(size != 0);
-
-
-    auto result = WitnessZ;
-
-    for(std::size_t i = 0; i < size - 1; i++) {
-        auto &pair = result.at(i);
-        auto x = pair.first.rightBound();
-
-        pair.second = in::CanonicPolynom({-x, 1});
+    for(std::size_t i = min; i < max; i++) {
+        dots[i] = longest[i];
     }
 
-    result.at(size - 1).second = in::CanonicPolynom({1, 0});
-
-    return result;
+    return InterpolationPolynom(dots);
 }
 
 Range::Range(X_t left, X_t right)
@@ -483,59 +501,6 @@ Range::Range(X_t left, X_t right)
     , m_right{right}
 {
     assert(right >= left); //!=-1
-}
-
-bool Range::inRangeStrict(X_t x) const
-{
-    return m_right > x && m_left < x;
-}
-
-bool Range::inRange(X_t x) const
-{
-    return m_right >= x && m_left <= x;
-}
-
-Range::pos_t Range::isCrossStrict(const Range &other) const
-{
-    if (*this == other) {
-        return equal;
-    }
-
-    if (inRange(other.m_left) && inRange(other.m_right)) {
-        return inside;
-    }
-
-    if (other.inRange(m_left) && other.inRange(m_right)) {
-        return outside;
-    }
-
-    if (inRangeStrict(other.m_left) || inRangeStrict(other.m_right) ||
-        other.inRangeStrict(m_left) || other.inRangeStrict(m_right)) {
-        return crossed;
-    }
-
-    if(m_left >= other.m_right) {
-        return right;
-    } else {
-        return left;
-    }
-}
-
-Range Range::crossByStrict(const Range &other) const
-{
-    if (!(isCrossStrict(other) & (crossed | inside | outside))) {
-        return {0, 0};
-    }
-
-    if(inRangeStrict(other.m_left)  && other.inRangeStrict(m_right)) {
-        return {other.m_left, m_right};
-    }
-
-    if(other.inRangeStrict(m_left)  && inRangeStrict(other.m_right)) {
-        return {m_left, other.m_right};
-    }
-
-    return {0, 0};
 }
 
 X_t Range::leftBound() const
@@ -559,7 +524,7 @@ Range Range::fromUnsorted(X_t a, X_t b)
 
 bool operator<(const Range &a, const Range &b)
 {
-    return a.rightBound() <= b.leftBound();
+    return a.rightBound() < b.leftBound();
 }
 
 bool operator==(const Range &a, const Range &b)
@@ -582,34 +547,20 @@ SplinePolynom::SplinePolynom(const map_t &map)
 {
 }
 
-SplinePolynom::SplinePolynom(dots_t dots, bool fromInterpolation)
+SplinePolynom::SplinePolynom(dots_t dots)
 {
     sortMT(dots.begin(), dots.end());
 
     using iterator = dots_t::const_iterator;
     using threader = Threader<iterator, map_t>;
 
-    auto fromFunc = fromInterpolation ?
-    [](map_t& m, const dots_t &dots)
+    auto fromFunc = [](map_t& m, const dots_t &dots)
     {
         m.insert({dots.front().x, dots.back().x}, InterpolationPolynom(dots).toCanonicPolynom());
-    } :
-    [](map_t& m, const dots_t &dots)
-    {
-        std::size_t n = dots.size();
-
-        xs_t xs;
-        xs.resize(n);
-
-        for (std::size_t i = 0; i < n; i++) {
-            xs[i] = dots[i].x;
-        }
-
-        m.insert({dots.front().x, dots.back().x}, CanonicPolynom(CanonicPolynom::coefsFromRoots(xs)));
     };
 
     auto func = [fromFunc](iterator begin, iterator end, map_t& m) {
-        for(auto it = begin; it != end; it = (it == end) ? it : std::prev(it)) {
+        for(auto it = begin; it != end; /*it = (it == end) ? it : std::prev(it)*/) {
             auto start = it;
             if (std::distance(it, end) >= snrk::SplinePartition) {
                 std::advance(it, snrk::SplinePartition);
@@ -625,7 +576,7 @@ SplinePolynom::SplinePolynom(dots_t dots, bool fromInterpolation)
 
     threader t(dots.begin(), dots.end(), func);
 
-    auto maps = t(threader::WithBound, snrk::SplinePartition).value();
+    auto maps = t(snrk::SplinePartition).value();
 
     std::size_t size = 0;
     for(const auto &map : maps) {
@@ -640,7 +591,12 @@ SplinePolynom::SplinePolynom(dots_t dots, bool fromInterpolation)
 
 Y_t SplinePolynom::operator()(X_t x) const
 {
-    return m_map[x](x);
+    if (x > std::prev(m_map.cend())->first.rightBound()) {
+        return m_map[x](x);
+    }
+
+    value_t localX = getUL(x) % (snrk::SplinePartition + 1);
+    return m_map[x](localX);
 }
 
 CanonicPolynom SplinePolynom::operator[](X_t x) const
@@ -832,6 +788,21 @@ SplinePolynom::map_t::pair_t &SplinePolynom::at(segment_t segment)
 commit_t SplinePolynom::commit(snrk::ProverParams &pp, segment_t segmentIndex) const
 {
     return m_map.atSegment(segmentIndex).second.commit(pp);
+}
+
+//todo: многопоток
+CanonicPolynom SplinePolynom::toCanonicPolynom() const
+{
+    in::coefs_t coefs;
+    coefs.reserve(m_map.size() > 0 ? m_map.size() * m_map.cbegin()->second.m_coefs.size() : 0);
+
+    for(std::size_t i = 0; i < m_map.size(); i++) {
+        for(auto c : m_map.atSegment(i).second.m_coefs) {
+            coefs.push_back(c);
+        }
+    }
+
+    return CanonicPolynom(coefs);
 }
 
 }
